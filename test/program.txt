@@ -1,0 +1,3 @@
+Assign "foo" (Const (I 4))
+Print (Var "foo")
+Pass

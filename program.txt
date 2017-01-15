@@ -1,0 +1,7 @@
+Assign "foo" (Const (I 4))
+Print (Var "foo")
+Assign "bar" (Const (I 5))
+Print (Var "bar")
+Assign "bar" (Const (B False))
+Print (Var "bar")
+Pass

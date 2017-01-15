@@ -21,15 +21,17 @@ import Control.Monad.Writer
 {- The pure expression language                                    -}
 {-------------------------------------------------------------------}
 
+-- http://catamorph.de/documents/Transformers.pdf
+
 data Val = I Int | B Bool
-           deriving (Eq, Show)
+           deriving (Eq, Show, Read)
 
 data Expr = Const Val
      | Add Expr Expr | Sub Expr Expr  | Mul Expr Expr | Div Expr Expr
      | And Expr Expr | Or Expr Expr | Not Expr 
      | Eq Expr Expr | Gt Expr Expr | Lt Expr Expr
      | Var String
-   deriving (Eq, Show)
+   deriving (Eq, Show, Read)
 
 type Name = String 
 type Env = Map.Map Name Val
@@ -104,4 +106,81 @@ data Statement = Assign String Expr
                | Seq Statement Statement
                | Try Statement Statement
                | Pass                    
-      deriving (Eq, Show)
+      deriving (Eq, Show, Read)
+
+type Program = [(Statement)]
+
+type Run a = StateT Env (ExceptT String IO) a 
+runRun p =  runExceptT ( runStateT p Map.empty) 
+
+set :: (Name, Val) -> Run ()
+set (s,i) = state $ (\table -> ((), Map.insert s i table))
+
+exec :: Statement -> Run ()
+exec (Assign s v) = do st <- get  
+                       Right val <- return $ runEval st (eval v)  
+                       set (s,val)
+
+exec (Seq s0 s1) = do exec s0 >> exec s1
+
+exec (Print e) = do st <- get
+                    Right val <- return $ runEval st (eval e) 
+                    liftIO $ System.print val
+                    return () 
+
+exec (If cond s0 s1) = do st <- get
+                          Right (B val) <- return $ runEval st (eval cond)
+                          if val then do exec s0 else do exec s1
+
+exec (While cond s) = do st <- get
+                         Right (B val) <- return $ runEval st (eval cond)
+                         if val then do exec s >> exec (While cond s) else return ()
+
+exec (Try s0 s1) = do catchError (exec s0) (\e -> exec s1)
+                        
+exec Pass = return ()
+
+-- Executes statements one by one based on user input
+-- 'n' to execute next statement
+-- 'q' to quit
+execStatements :: Env -> [Statement] -> Run ()
+execStatements _ [] = do
+  liftIO $ putStrLn ">>>>>> Reached end of input program"
+  return ()
+execStatements env (x:xs) = do
+  liftIO $ putStrLn (">> Statement: " ++ (show x))
+  userInput <- liftIO $ getLine
+  case userInput of 
+    "n" -> do
+      exec x
+      newEnv <- get
+      execStatements newEnv xs
+    "q" -> do
+      return()
+    _ -> do
+      liftIO $ putStrLn "Unrecognised command"
+      execStatements env (x:xs)
+
+-- Convert lines to statements
+getStatements :: [String] -> [Statement]
+getStatements = map read
+
+
+-- Entry point
+-- Reads file and sets up initial env and statements list
+startInterpreter :: String -> Run ()
+startInterpreter fname = do 
+  fileHandle <- liftIO $ readFile fname
+  let fileLines = lines fileHandle
+  let theProgram = getStatements fileLines               -- Execute the first statement
+  env <- get
+  liftIO $ putStrLn "** Interpreter started **"
+  liftIO $ putStrLn "'n' to execute next statement. 'q' to quit"
+  execStatements env theProgram
+
+
+prog1 = Assign "foo" (Const (I 1))  `Seq`
+        Print (Var "foo")
+
+prog2 = Print (Const (I 1)) `Seq`
+        Print (Const (I 2))
